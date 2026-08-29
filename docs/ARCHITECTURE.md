@@ -6,7 +6,7 @@
 - `rag/pipeline.py` — page-aware PDF parsing, chunking, keyword (BM25-lite) retrieval with source metadata.
 - `ai/pipeline.py` — Claude agents: requirement extractor, evidence matcher, risk analyzer, action planner. Strict anti-hallucination prompts, JSON validation.
 - `services/analysis_service.py` — orchestrates the 9-stage pipeline as a background task.
-- `services/storage.py` — Local filesystem and S3 object storage for PDF binaries.
+- `services/storage.py` — Emergent object storage for PDF binaries.
 - `routes/auth_routes.py`, `routes/workspace_routes.py` — all API endpoints under `/api`.
 - `seed_demo.py` — idempotent demo workspace seeding.
 

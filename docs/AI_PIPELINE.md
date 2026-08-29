@@ -1,6 +1,7 @@
 # AI Pipeline
 
-Provider abstraction: `ai/pipeline.py` uses Anthropic Messages API (`ANTHROPIC_API_KEY`) or OpenAI API (`OPENAI_API_KEY`). The model can be configured via `ANTHROPIC_MODEL` or `OPENAI_MODEL`.
+Provider abstraction: `ai/pipeline.py` uses `emergentintegrations.LlmChat` with
+`anthropic / claude-sonnet-4-6`. The model can be swapped by changing `MODEL_PROVIDER` / `MODEL_NAME`.
 
 ## Stages (`services/analysis_service.py`)
 1. Reading tender documents — load page-aware text.

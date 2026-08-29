@@ -9,19 +9,18 @@ produces a BID / BID WITH CONDITIONS / NO-BID recommendation plus an action plan
 - Frontend: React 19 + React Router + Tailwind (Site Office design system) — `/app/frontend`
 - Backend: FastAPI (modular agents/rag/services/routes) — `/app/backend`
 - Database: MongoDB (workspace-isolated collections)
-- File storage: Local filesystem storage (or AWS S3); extracted page text in MongoDB
-- AI: Anthropic Claude (Claude 3.5 / 3.7 Sonnet) or OpenAI (GPT-4o)
+- File storage: Emergent object storage (uploaded PDF binaries); extracted page text in MongoDB
+- AI: Claude Sonnet 4.6 via Emergent Universal Key (`emergentintegrations`)
 
 ## Run
-- Backend: `uvicorn server:app --host 0.0.0.0 --port 8000`
-- Frontend: `npm start` (or `yarn start`)
+Services are managed by supervisor and already running.
+- Backend: `sudo supervisorctl restart backend`
+- Frontend: `sudo supervisorctl restart frontend`
 
 ## Environment variables (`backend/.env`)
-- `MONGO_URL`, `DB_NAME` — MongoDB database connection
-- `JWT_SECRET` — auth token signing key
-- `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) — LLM provider key
-- `CORS_ORIGINS` — allowed frontend origins (e.g. `http://localhost:3000`)
-- `STORAGE_DIR` (optional) / `S3_BUCKET` (optional) — file storage configuration
+- `MONGO_URL`, `DB_NAME` — database
+- `JWT_SECRET` — auth signing
+- `EMERGENT_LLM_KEY` — LLM + object storage
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `DEMO_EMAIL` / `DEMO_PASSWORD`
 
 ## Demo login
