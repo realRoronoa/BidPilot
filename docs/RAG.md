@@ -15,5 +15,5 @@ Every requirement/finding carries `evidence_source_document` + `evidence_source_
 Evidence Viewer (extracted page text shown; no fabricated pixel highlights).
 
 ## Storage
-PDF binaries live in Emergent object storage; extracted page text is stored in MongoDB `documents.pages`
+PDF binaries live in local filesystem or S3 object storage; extracted page text is stored in MongoDB `documents.pages`
 (the source of truth for analysis and retrieval).

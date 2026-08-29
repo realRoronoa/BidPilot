@@ -12,7 +12,7 @@ no fake payments, no fabricated evidence).
 ## Architecture (this env: React + FastAPI + MongoDB, adapted from the spec's Next/Postgres)
 - FastAPI modular backend: core (auth/db/decision), rag (parse/chunk/retrieve), ai (Claude agents),
   services (analysis orchestration, object storage), routes (auth + workspace).
-- Claude Sonnet 4.6 via Emergent Universal Key. Emergent object storage for PDF binaries.
+- Claude Sonnet (Anthropic) or OpenAI models directly. Local filesystem / S3 object storage for PDF binaries.
 - React SPA with AuthContext, AppShell, and 12 pages. Site Office design (Spectral/Inter/IBM Plex Mono,
   paper/navy/amber, decision stamps).
 
