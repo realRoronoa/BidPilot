@@ -1,0 +1,20 @@
+{
+  "summary": "Phase-2 Portfolio Intelligence backend + frontend fully verified WITH full Phase-1 regression. Extended /app/backend/tests/backend_test.py with 11 new pytest tests (capacity seeded/persist, opportunities seeded/patch, portfolio optimize baseline+what-if, conflicts, summary, compare, objectives). Ran full suite: 36/36 passed in 152.98s (includes 2 real Claude pipeline runs). Frontend Playwright: Demo Login → dashboard portfolio-banner navigates to /portfolio; buckets PURSUE/WATCH/DEFER render with rec-opp-A + rec-opp-C in PURSUE; conflict-0 card visible; objective-value switches objective; sim-specialist_engineers=2 + run-scenario-btn produces scenario-result showing Added='Chennai Elevated Corridor Package B2' — matches backend spec. /opportunities lists 5 seeded opp rows (opp-A..E) with stage dropdowns; selecting opp-A+opp-B and clicking compare-btn opens compare-modal. /capacity renders cap-estimators=4 with save-capacity-btn and USER_PROVIDED source badges. /analyses/demo-analysis-0001 Overview shows Portfolio impact side panel with Impact=HIGH, Capital=₹1.5 Cr, Estimators=1, Specialist eng.=1 and resource-conflict note listing Chennai/Hubballi/Mumbai/Mysuru + pi-compare and pi-simulate buttons. Deterministic portfolio math matches expected: pursue={A,C}, watch={B,E}, defer={D}, specialist used=1/limit=1; what-if specialist=2 adds opp-B. Summary total=5, pursue=2, watch=2, defer=1. Compare best_value=opp-A (412Cr), best_lowrisk=opp-C (LOW), best_qualification=opp-B (91%). Explainability: WATCH items carry conflict notes, DEFER opp-D note references low qualification (58%). Zero console errors observed. No LLM in portfolio math (pure Python).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "portfolio/engine.py optimize() is O(2^n) brute-force up to n<=15 opportunities; fallback greedy for larger. Fine for demo (n=5) but consider ILP or beam search if pipelines grow — currently gated correctly by max_brute.",
+    "portfolio_routes.py PUT /capacity does not validate equipment schema (name/total/committed) — malformed equipment would silently break capacity_limits later. Add pydantic model for equipment rows.",
+    "detect_conflicts overlaps deadline logic uses date.fromisoformat inside a loop with a broad except — a malformed deadline silently drops the pair. Consider logging.",
+    "Frontend Portfolio.jsx: resetScenario visible only after a scenario exists; good UX. No a11y label on sim-* number inputs; screen reader will read the raw testid."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "100% (portfolio, opportunities, capacity, analysis portfolio-impact, dashboard banner, what-if)"},
+  "test_credentials": "demo@bidpilot.io / demo1234 ; admin@bidpilot.io / admin123",
+  "seed_data_creation": "None persisted. Capacity estimators toggled +1 then reverted; opp-C stage toggled then reverted. No stray opportunities or analyses; demo workspace remains total=1 analysis, 5 opps (opp-A..E), 7 docs.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite is /app/backend/tests/backend_test.py — 36 tests, ~2.5 min (2 real Claude pipeline runs at ~60-90s each). Phase-2 testids to remember: portfolio-banner (Dashboard), bucket-{PURSUE|WATCH|DEFER}, rec-{opp-id}, conflict-{n}, objective-{value|balanced|risk|qualification|strategic}, sim-{specialist_engineers|estimators|working_capital_cr}, run-scenario-btn, reset-scenario-btn, scenario-result, compare-btn, compare-modal, compare-close, opp-row-{id}, opp-check-{id}, opp-stage-{id}, opp-del-{id}, cap-{key}, save-capacity-btn, add-equip-btn, equip-name-{i}, del-equip-{i}, pi-compare, pi-simulate. Deterministic math: baseline value objective ⇒ pursue={A,C}, watch={B,E}, defer={D}. What-if specialist_engineers=2 adds opp-B (Chennai)."
+}

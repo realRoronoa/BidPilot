@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 2 focused on the 3 new features (server-side branded PDF report, OCR-aware upload path, semantic-embeddings requirement matching) plus regressions. Backend: extended /app/backend/tests/backend_test.py with 6 new tests (report download 200/%PDF/>3KB/attachment header, report auth-required, report workspace-isolation 404, report on nonexistent 404, OCR-change upload regression, and full-pipeline semantic retrieval verifying 'Similar completed projects'=FAIL and 'turnover'=PASS via 42 Cr → 30 Cr semantic match). Full suite = 25 tests, all passing (2 full ~60s AI pipeline runs; total ~2m28s). Brute-force lockout previously reported broken is now fixed and returns 429 after 5 attempts. Frontend: seeded demo → /analyses/demo-analysis-0001/decision, clicked data-testid='export-report-btn'; Playwright captured a real download event (Blob-based) yielding 'BidPilot - Bengaluru Metro Corridor-7 — Civil Works Package C4.pdf' 5704 bytes, %PDF header, 'Report downloaded' success toast, and zero console errors. Demo dashboard remains total=1, conditional=1, decision BID WITH CONDITIONS at 76%.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /analyses/{aid}/report correctly enforces workspace scope and status=='completed' (returns 400 for pending, 404 for missing/other-workspace).",
+    "Frontend exportReport uses api.raw with responseType blob and creates an object URL – good pattern; download works end-to-end. Filename may contain em-dash characters; Content-Disposition is quoted so it works, but consider stripping non-ASCII for cross-browser safety.",
+    "OCR-change upload flow: minimal (very short) text PDFs are classified as is_scanned and marked 'Needs Review' (verification_state) even though parse succeeded – acceptable heuristic, but consider a minimum-text-length threshold that's less strict than current (an 11-char extract triggers scanned=true).",
+    "AnalysisWorkspace.jsx exportReport catch swallows the error object; consider logging response status to help future debugging."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% (Decision tab report export flow)"},
+  "test_credentials": "demo@bidpilot.io / demo1234 ; admin@bidpilot.io / admin123",
+  "seed_data_creation": "None persisted. Created & cleaned up: TEST_ocr_regress.pdf (deleted; also cleaned a stale artefact from an earlier failing run), TEST_Real_Run and TEST_Semantic_Run analyses (deleted). Demo workspace analyses total remains 1.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite at /app/backend/tests/backend_test.py has 25 tests including two ~60s full-pipeline runs (real Claude). Run with: pytest backend/tests/backend_test.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml (takes ~2.5 min). New feature tests are grouped under 'New Features (iteration 2)' at bottom. Report endpoint is auth-scoped and status-checked; expect 401 unauth, 404 cross-workspace/nonexistent, 400 for non-completed. Semantic match: '42 Cr' evidence must map to '30 Cr' turnover requirement → PASS. Frontend export uses download event (blob), not a print dialog. If refactoring, keep data-testid='export-report-btn'."
+}

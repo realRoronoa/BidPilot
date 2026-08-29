@@ -1,0 +1,140 @@
+{
+  "app_name": "BidPilot",
+  "tagline": "Know before you bid.",
+  "theme_strategy": {
+    "default_theme": "light",
+    "rationale": "The 'Site Office' aesthetic relies heavily on physical media metaphors—paper, blueprints, and official documents. Light mode is mandatory to evoke the feeling of printed tender documents, white panels, and rubber stamps."
+  },
+  "typography": {
+    "fonts": [
+      {
+        "role": "Headings, Decision Statements, Editorial Emphasis",
+        "family": "Spectral, serif",
+        "weight": "400, 600",
+        "usage": "Use for the primary 'BID / NO-BID' stamps, page titles, and major dashboard numbers. Gives an authoritative, analog feel."
+      },
+      {
+        "role": "Body, Buttons, Navigation, Forms, Tables",
+        "family": "Inter, sans-serif",
+        "weight": "400, 500, 600",
+        "usage": "Standard UI font. Must be crisp and readable in dense data tables."
+      },
+      {
+        "role": "Document References, Technical IDs, Source Metadata, Timestamps, Tech Values",
+        "family": "'IBM Plex Mono', monospace",
+        "weight": "400, 500",
+        "usage": "Use for any extracted data from PDFs, page numbers, confidence scores, and IDs. Adds a 'machine-read' technical aesthetic."
+      }
+    ],
+    "installation_instructions": "Add Google Fonts links for Spectral, Inter, and IBM Plex Mono in index.html."
+  },
+  "colors": {
+    "background": {
+      "paper": "#F4F3EE",
+      "panel": "#FFFFFF",
+      "blueprint_accent": "#1A365D",
+      "stamp_amber": "#C05621"
+    },
+    "status": {
+      "pass": {
+        "bg": "#E6F4EA",
+        "text": "#1E4620",
+        "border": "#A8D5B2"
+      },
+      "fail": {
+        "bg": "#FCE8E6",
+        "text": "#A50E0E",
+        "border": "#F5B7B1"
+      },
+      "review": {
+        "bg": "#FEF7E0",
+        "text": "#8B5A00",
+        "border": "#FAD7A1"
+      }
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "tertiary": "#9CA3AF"
+    },
+    "ui": {
+      "border": "#D1D5DB",
+      "divider": "#E5E7EB"
+    }
+  },
+  "visual_enhancers": {
+    "borders": "Fine, crisp 1px borders (#D1D5DB). Used extensively to create a document-like structure. Tables and panels should look like structured paperwork.",
+    "shadows": "Subtle, ambient shadows. Avoid heavy dropshadows. Use Tailwind 'shadow-sm' for panels, and 'shadow-none' for internal dividers.",
+    "radius": "Moderate corner radius. 'rounded-md' (6px) or 'rounded-sm' (4px) to mimic slight rounding on modern software, but not pill-shaped.",
+    "forbidden": [
+      "Glassmorphism (no backdrop-blur on panels)",
+      "Generic purple AI gradients",
+      "Neon or cyberpunk glowing effects",
+      "Futuristic robot/AI sparkles",
+      "Excessive animations"
+    ]
+  },
+  "components": {
+    "decision_stamp": {
+      "description": "Signature visual element for BID / BID WITH CONDITIONS / NO-BID.",
+      "css_strategy": "Use a rotated div (e.g., transform: rotate(-5deg)), an uppercase Spectral font (text-4xl or larger), tracking-widest, bold. Use a double or thick dashed border. Color should be the 'stamp_amber' (#C05621). Apply 'mix-blend-mode: multiply' against the background to simulate ink on paper. Add a very faint SVG noise mask or 'opacity-90' to give it a slightly distressed look."
+    },
+    "document_viewer": {
+      "description": "Split pane showing PDF/Document extraction. Use a light gray background for the viewer area and a white panel for the extracted data. Use IBM Plex Mono for the page source tags.",
+      "layout": "grid grid-cols-2 gap-4 h-full"
+    },
+    "status_badges": {
+      "description": "PASS / FAIL / NEEDS REVIEW markers. Must NOT rely on color alone.",
+      "accessibility": "Always pair with an icon. Pass = CheckCircle, Fail = XCircle, Review = WarningCircle. Use the specific muted color palette."
+    }
+  },
+  "layouts": {
+    "density": "High density, operational workspace. Use Tailwind padding p-4 or p-6 for panels, tight gaps (gap-2 to gap-4) in data tables.",
+    "navigation": "Blueprint Navy (#1A365D) sidebar or top nav with white Inter text. Serious, non-distracting.",
+    "grids": "Use precise CSS grids for the 'Analysis workspace' tabs (Overview, Requirements, Eligibility, etc.). Ensure 'h-full' and 'overflow-y-auto' for inner scrollable document panes."
+  },
+  "motion": {
+    "style": "Utilitarian and crisp. No bouncy animations.",
+    "interactions": "Hover states on rows (bg-gray-50), subtle tab underlines. No parallax or 3D transitions."
+  },
+  "accessibility": {
+    "contrast": "Maintain WCAG AA compliance. Dark navy and deep amber text over paper background.",
+    "status_indicators": "Never use color alone. Always include text (PASS/FAIL) and an icon (Check/X).",
+    "testing": "All interactive and key informational elements MUST include a 'data-testid' attribute (e.g., data-testid='decision-stamp', data-testid='upload-tender-btn')."
+  },
+  "media": {
+    "icons": "Use 'lucide-react' for all standard UI icons (Check, X, AlertTriangle, FileText, Settings, User). Stroke width 1.5 or 2 for clear visibility.",
+    "image_urls": {
+      "engineering_team": {
+        "url": "https://images.unsplash.com/photo-1581094488379-6a10d04c0f04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxlbmdpbmVlcmluZyUyMGJsdWVwcmludHMlMjBjb25zdHJ1Y3Rpb258ZW58MHx8fHwxNzg4MDI5NTk4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Engineers reviewing blueprints. Use in login split-screen or marketing overview."
+      },
+      "architect_draft": {
+        "url": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwxfHxlbmdpbmVlcmluZyUyMGJsdWVwcmludHMlMjBjb25zdHJ1Y3Rpb258ZW58MHx8fHwxNzg4MDI5NTk4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Architect working on draft. Can be used in empty states or wizard intro."
+      },
+      "site_office": {
+        "url": "https://images.unsplash.com/photo-1758979658225-c833408a2e0b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxjb25zdHJ1Y3Rpb24lMjBjb250cmFjdG9yJTIwc2l0ZSUyMG9mZmljZXxlbnwwfHx8fDE3ODgwMjk1OTh8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Portable buildings on site. For company profile or background context."
+      }
+    }
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You must build a dense, operational interface. Avoid sparse consumer app layouts. Think 'Bloomberg Terminal' meets 'Construction Paperwork'.",
+    "Use Tailwind exclusively for styling. Do not write custom CSS unless strictly required for the Rubber Stamp mix-blend-mode effect.",
+    "Implement the UI using React (.js files, not .tsx).",
+    "Never use generic AI emojis (🤖, 🧠, 💡). Use serious Lucide icons.",
+    "Add 'data-testid' to all buttons, inputs, tabs, and major informational components to ensure testing capability.",
+    "Prioritize HTML semantics and accessibility—do not use empty divs for clickable elements; use <button>.",
+    "Use Shadcn UI components but strip away the default 'Vercel' look if it feels too soft or startup-y. Make borders 1px solid and corners slightly sharper (rounded-sm instead of rounded-xl)."
+  ],
+  "instructions_to_main_agent": {
+    "step_1": "Setup global CSS. Apply the 'paper' background color (#F4F3EE) to the body. Import Spectral, Inter, and IBM Plex Mono fonts.",
+    "step_2": "Build Layout Shell. Create a top or side navigation using the 'blueprint navy' color. Ensure it looks rigid and professional.",
+    "step_3": "Build the 'Decision Stamp' component using Spectral font, Amber text/border, and a slight rotation to simulate a rubber stamp.",
+    "step_4": "Develop the Analysis Workspace. Use a grid layout for the document pane (left) and the AI extraction data (right). Use IBM Plex Mono for all source references and page numbers.",
+    "step_5": "Create the Readiness Score and PASS/FAIL rows. Ensure each status uses a specific muted color (green/red/amber), text label, and an icon.",
+    "step_6": "Construct the Dashboard and Forms (New Analysis Wizard). Use dense Shadcn forms with fine borders.",
+    "step_7": "Integrate standard generic images from the image_urls block where necessary (Login screen split, empty states)."
+  }
+}

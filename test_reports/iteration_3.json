@@ -1,0 +1,18 @@
+{
+  "summary": "Regression pass after code-quality refactors (core/decision.py defaults, analysis_service.py top-level uuid/datetime imports, server.py datetime import, AuthContext useMemo, Documents.jsx useMemo, stable list keys). Ran full pytest suite (25/25) in ~2m32s covering auth (demo-login, signup+login, brute-force 429 lockout, logout), dashboard (total=1, conditional=1), seeded analysis (BID WITH CONDITIONS @ 76%), full AI pipeline x2 with cleanup (requirements populated, Similar completed projects=FAIL, turnover=PASS, decision + actions + notification), server-side PDF report (200 %PDF, 401 unauth, 404 cross-workspace/nonexistent), documents (7 seeded, upload+delete), OCR-tolerant upload, company, notifications, billing sandbox, users invite/role, workspace isolation. Frontend Playwright regression: Demo Login → dashboard renders 4 upcoming deadlines and recent analyses; open seeded analysis Decision tab → export-report-btn triggers a real Blob download (BidPilot - Bengaluru Metro Corridor-7 — Civil Works Package C4.pdf, 5704 bytes, %PDF header) with 'Report downloaded' toast and zero console errors; Company page renders registrations/certifications/projects; Documents page renders 7 rows with search + 9 category filter chips (doc-cat-*); user-menu-btn → logout-btn returns user to /login. Demo workspace remains total=1 (no leaked test analyses).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Refactors verified: core/decision.py always initializes outcome/recommendation before branches — no undefined-var risk. analysis_service.py uuid/datetime hoisted to module scope — pipeline still runs both full 60-90s runs cleanly. server.py seed_admin datetime import top-level — startup and report route unaffected. AuthContext useMemo value + logout catch logging — no auth regressions, logout cleanly returns to /login. Documents.jsx filtered/expiringSoon useMemo before early return — 7 rows render with working search and category filters. Stable list keys on Dashboard/Company/AnalysisWorkspace — no console key warnings observed.",
+    "Nit (unchanged from prior review): AnalysisWorkspace.jsx exportReport catch could log response status for easier debugging; filename retains em-dash (safe today via quoted Content-Disposition)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% (login, dashboard, decision export, company, documents, logout)"},
+  "test_credentials": "demo@bidpilot.io / demo1234 ; admin@bidpilot.io / admin123",
+  "seed_data_creation": "None persisted. Two analyses (TEST_Real_Run, TEST_Semantic_Run) and two docs (TEST_upload.pdf, TEST_ocr_regress.pdf) were created and deleted inside the tests. Demo workspace analyses total remains 1.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite at /app/backend/tests/backend_test.py = 25 tests, ~2.5 min due to 2 real Claude pipeline runs. Frontend export uses page.expect_download (Blob path, not print dialog). Logout is under [data-testid=user-menu-btn] -> [data-testid=logout-btn]. Documents rows are doc-row-cd-{1..7}. Report route: 200 for demo-analysis-0001 completed, 400 for pending, 401 unauth, 404 cross-workspace/nonexistent."
+}

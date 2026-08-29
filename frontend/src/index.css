@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 20% 94%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 213 57% 23%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 15% 90%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 40 15% 92%;
+    --muted-foreground: 220 9% 40%;
+    --accent: 40 15% 90%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 82%;
+    --input: 220 13% 82%;
+    --ring: 213 57% 23%;
+    --radius: 0.375rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    margin: 0;
+    background-color: #F4F3EE;
+    color: #111827;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3, .font-serif { font-family: 'Spectral', Georgia, serif; }
+  code, .font-mono { font-family: 'IBM Plex Mono', monospace; }
+}
+
+/* Subtle paper/blueprint texture for backgrounds */
+.paper-grid {
+  background-color: #F4F3EE;
+  background-image:
+    linear-gradient(rgba(26,54,93,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,54,93,0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.blueprint-bg {
+  background-color: #122744;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Decision stamp — rubber-stamp ink effect */
+.decision-stamp {
+  font-family: 'Spectral', Georgia, serif;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  border: 4px double currentColor;
+  border-radius: 8px;
+  padding: 0.5rem 1.5rem;
+  transform: rotate(-4deg);
+  mix-blend-mode: multiply;
+  opacity: 0.92;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.decision-stamp::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background-image: radial-gradient(rgba(255,255,255,0.5) 0.5px, transparent 0.5px);
+  background-size: 3px 3px;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+.stamp-bid { color: #1E4620; }
+.stamp-conditional { color: #C05621; }
+.stamp-nobid { color: #A50E0E; }
+
+::selection { background: #C05621; color: #fff; }
+
+.scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+@layer base {
+  [data-debug-wrapper="true"] { display: contents !important; }
+}
