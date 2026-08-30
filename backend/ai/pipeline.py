@@ -67,8 +67,10 @@ class LlmChat:
                 if isinstance(data, dict):
                     return data.get("response") or data.get("content") or data.get("text") or json.dumps(data)
                 return str(data)
-        except Exception:
-            pass
+            else:
+                print(f"Emergent Gateway returned {resp.status_code}: {resp.text}")
+        except Exception as e:
+            print(f"Emergent Gateway failed: {e}")
 
         # 2. Anthropic Direct fallback
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or (self.api_key if self.api_key.startswith("sk-ant-") else None)
@@ -86,7 +88,7 @@ class LlmChat:
             return "".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
 
         # 3. OpenAI Direct fallback
-        openai_key = os.environ.get("OPENAI_API_KEY") or (self.api_key if self.api_key.startswith("sk-") else None)
+        openai_key = os.environ.get("OPENAI_API_KEY") or (self.api_key if (self.api_key.startswith("sk-") and not self.api_key.startswith("sk-emergent-")) else None)
         if openai_key:
             headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
             p = {
@@ -153,12 +155,34 @@ def _tender_context(tender_pages, max_chars=14000):
     return "\n".join(parts)
 
 
-async def extract_requirements(tender_pages, company_summary):
+async def extract_requirements(tender_chunks, company_summary):
     system = (
         "You are BidPilot's Requirement Extractor for construction tenders. "
         "Extract concrete, checkable requirements a bidder must satisfy. " + ANTI_HALLUCINATION
     )
-    context = _tender_context(tender_pages)
+    
+    # RAG: Retrieve context specifically for requirements and deadlines
+    queries = [
+        "eligibility criteria criteria requirements",
+        "financial turnover working capital",
+        "technical experience similar projects",
+        "personnel engineers project managers",
+        "equipment machinery",
+        "deadlines submission dates"
+    ]
+    
+    retrieved = []
+    seen = set()
+    for q in queries:
+        chunks = semantic_retrieve(q, tender_chunks, top_k=3)
+        for c in chunks:
+            text_id = f"{c['page_number']}-{c['text'][:20]}"
+            if text_id not in seen:
+                seen.add(text_id)
+                retrieved.append(c)
+                
+    context = "\n\n".join(f"[PAGE {c['page_number']}]\n{c['text']}" for c in retrieved)
+    
     prompt = f"""From the tender text below, extract every important requirement.
 Categorize each into one of: Eligibility, Financial, Compliance, Technical, Personnel, Equipment.
 
@@ -241,12 +265,31 @@ Return JSON:
     }
 
 
-async def analyze_risks(tender_pages):
+async def analyze_risks(tender_chunks):
     system = (
         "You are BidPilot's Risk Analyzer for construction tenders. Identify commercial and project "
         "risks strictly from the tender text. " + ANTI_HALLUCINATION
     )
-    context = _tender_context(tender_pages, max_chars=12000)
+    
+    queries = [
+        "liquidated damages penalties delay",
+        "payment terms retention money defect liability",
+        "termination default disputes",
+        "bid security performance bank guarantee"
+    ]
+    
+    retrieved = []
+    seen = set()
+    for q in queries:
+        chunks = semantic_retrieve(q, tender_chunks, top_k=4)
+        for c in chunks:
+            text_id = f"{c['page_number']}-{c['text'][:20]}"
+            if text_id not in seen:
+                seen.add(text_id)
+                retrieved.append(c)
+                
+    context = "\n\n".join(f"[PAGE {c['page_number']}]\n{c['text']}" for c in retrieved)
+    
     prompt = f"""Identify commercial/project risks from the tender text (schedule, liquidated damages,
 price escalation, payment terms, site access, technical complexity, resources, contractual exposure).
 

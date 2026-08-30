@@ -77,6 +77,39 @@ async def signup(body: SignupBody, response: Response):
             "registrations": [], "certifications": []})
     await db.audit_events.insert_one({"id": uuid.uuid4().hex, "workspace_id": wid, "actor": body.name,
                                       "event": "signup", "detail": "Account created", "created_at": now_iso()})
+    # ---- Seed Free subscription and usage record for new workspace ----
+    # $setOnInsert fires only on insert (upsert creates new doc) — safe to call repeatedly.
+    # Existing subscriptions are never overwritten by this block.
+    await db.subscriptions.update_one(
+        {"workspace_id": wid},
+        {"$setOnInsert": {
+            "workspace_id": wid,
+            "plan_id": "plan-free",
+            "plan_name": "Free",
+            "plan_price": 0,
+            "status": "active",
+            "billing_cycle": "monthly",
+            "billing_period_start": now_iso(),
+            "activated_at": now_iso(),
+            "sandbox": False,
+            "payment_method": None,
+        }},
+        upsert=True,
+    )
+    await db.usage_records.update_one(
+        {"workspace_id": wid},
+        {"$setOnInsert": {
+            "workspace_id": wid,
+            "period": "current",
+            "analyses_used": 0,
+            "analyses_limit": 2,
+            "storage_used_gb": 0,
+            "storage_limit_gb": 0.5,
+            "users_used": 1,
+            "users_limit": 1,
+        }},
+        upsert=True,
+    )
     set_auth_cookies(response, create_access_token(uid, email), create_refresh_token(uid))
     return _public(user)
 

@@ -17,27 +17,37 @@ STOPWORDS = set("""a an the of to in for and or is are be as at by with on from 
 shall will must should may can any all such other than not no which who whom whose it its into per""".split())
 
 
-def _ocr_pages(path, page_numbers, dpi=200):
-    """OCR specific 1-indexed pages of a PDF. Returns {page_number: text}. Empty on failure."""
-    if not page_numbers:
-        return {}
+def _ocr_pages(path, max_ocr_pages=25):
+    """OCR a scanned PDF using Gemini Multimodal File API. Returns a dict {1: text} (all text put on page 1 for simplicity) or empty on failure."""
     try:
-        import pytesseract
-        from pdf2image import convert_from_path
-    except Exception as e:
-        logger.error(f"OCR libraries unavailable: {e}")
-        return {}
-    out = {}
-    for pn in page_numbers:
+        import os
+        import google.generativeai as genai
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY not found for OCR fallback")
+            return {}
+            
+        genai.configure(api_key=api_key)
+        
+        logger.info(f"Uploading {path} to Gemini for OCR extraction...")
+        myfile = genai.upload_file(path)
+        
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content([myfile, "Extract all the text from this document accurately. Do not summarize. Just output the extracted text."])
+        
+        # Cleanup
         try:
-            images = convert_from_path(path, dpi=dpi, first_page=pn, last_page=pn)
-            if not images:
-                continue
-            text = pytesseract.image_to_string(images[0]) or ""
-            out[pn] = re.sub(r"[ \t]+", " ", text).strip()
-        except Exception as e:
-            logger.error(f"OCR failed on page {pn}: {e}")
-    return out
+            genai.delete_file(myfile.name)
+        except Exception:
+            pass
+            
+        text = response.text
+        if text:
+            # We bundle all extracted text into 'page 1' since Gemini processes the whole file
+            return {1: text.strip()}
+    except Exception as e:
+        logger.error(f"Gemini OCR failed: {e}")
+    return {}
 
 
 def parse_pdf(path: str, ocr: bool = True, max_ocr_pages: int = 25):
@@ -64,16 +74,16 @@ def parse_pdf(path: str, ocr: bool = True, max_ocr_pages: int = 25):
 
     is_scanned = total_chars < 40 * max(1, len(pages))
     ocr_applied = False
-    if ocr and empty_pages:
-        ocr_text = _ocr_pages(path, empty_pages[:max_ocr_pages])
-        for pn, txt in ocr_text.items():
-            if txt:
-                pages[pn - 1]["text"] = txt
-                pages[pn - 1]["ocr"] = True
-                ocr_applied = True
+    if ocr and empty_pages and is_scanned:
+        ocr_text = _ocr_pages(path, max_ocr_pages)
+        if ocr_text and 1 in ocr_text:
+            # If Gemini successfully extracted text, replace all pages with this single block of text on page 1
+            pages = [{"page_number": 1, "text": ocr_text[1], "ocr": True}]
+            ocr_applied = True
+            
         # recompute scanned flag: if OCR recovered substantial text, no longer "unreadable"
         total_chars = sum(len(p["text"]) for p in pages)
-        if ocr_applied and total_chars >= 40 * max(1, len(pages)):
+        if ocr_applied and total_chars >= 40:
             is_scanned = False
 
     return pages, is_scanned, len(reader.pages)

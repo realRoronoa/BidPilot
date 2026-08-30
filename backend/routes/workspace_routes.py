@@ -3,7 +3,7 @@ import uuid
 import hmac
 import hashlib
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import razorpay
 
@@ -13,9 +13,11 @@ from pydantic import BaseModel
 
 from core.db import db
 from core.auth import get_current_user
-from rag.pipeline import parse_pdf
+from rag.pipeline import parse_pdf, chunk_pages
+from rag.embeddings import attach_embeddings
 from services.analysis_service import run_analysis, STAGES
 from services.storage import put_object, get_object, APP_NAME
+from ai.portfolio import optimize_portfolio
 
 router = APIRouter(prefix="/api", tags=["workspace"])
 
@@ -105,6 +107,26 @@ async def create_analysis(body: CreateAnalysis, background: BackgroundTasks,
     company = await db.companies.find_one({"id": body.company_id, "workspace_id": w}, {"_id": 0})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found.")
+
+    # ---- Entitlement enforcement: check analyses_used vs analyses_limit ----
+    usage_rec = await db.usage_records.find_one({"workspace_id": w}, {"_id": 0})
+    if usage_rec:
+        used = usage_rec.get("analyses_used", 0)
+        limit = usage_rec.get("analyses_limit", 5)  # default to Starter limit if missing
+        if used >= limit:
+            sub = await db.subscriptions.find_one({"workspace_id": w}, {"_id": 0})
+            plan_name = (sub or {}).get("plan_name", "current plan")
+            raise HTTPException(
+                status_code=402,
+                detail=f"Analysis limit reached ({used}/{limit} used on {plan_name}). "
+                       f"Please upgrade your plan to run more analyses."
+            )
+    # Increment analyses_used counter
+    await db.usage_records.update_one(
+        {"workspace_id": w},
+        {"$inc": {"analyses_used": 1}},
+    )
+
     aid = uuid.uuid4().hex
     await db.analyses.insert_one({
         "id": aid, "workspace_id": w, "company_id": body.company_id,
@@ -307,6 +329,10 @@ class CompanyBody(BaseModel):
     years_experience: int = 0
     turnover: str = ""
     specialization: str = ""
+    working_capital: float = 0.0
+    estimators: int = 0
+    specialists: int = 0
+    project_managers: int = 0
 
 
 @router.get("/companies")
@@ -409,7 +435,21 @@ async def upload_document(background: BackgroundTasks, file: UploadFile = File(.
     await db.documents.insert_one(doc)
     await audit(w, user["name"], "document_uploaded", f"Uploaded {file.filename}")
     doc.pop("_id", None)
-    doc.pop("pages", None)
+    
+    # RAG pipeline: chunk pages and compute embeddings
+    # Do not save full 'pages' in the document dict sent to client
+    extracted_pages = doc.pop("pages", [])
+    if extracted_pages:
+        chunks = chunk_pages(extracted_pages, did, doc_type, file.filename)
+        # Compute embeddings in background or directly (blocking for now as requested)
+        chunks = attach_embeddings(chunks)
+        # Add chunks to MongoDB
+        if chunks:
+            # We add a UUID to each chunk to identify them
+            for c in chunks:
+                c["id"] = uuid.uuid4().hex
+            await db.document_chunks.insert_many(chunks)
+
     if is_scanned:
         doc["notice"] = ("This PDF appears to be scanned; no text could be reliably extracted. "
                          "Analysis on this document may be limited (OCR not available).")
@@ -492,6 +532,80 @@ async def patch_member(mid: str, body: MemberPatch, user: dict = Depends(get_cur
 
 
 # ----------------------------- BILLING -----------------------------
+class UpgradeBody(BaseModel):
+    plan_id: str
+
+
+class RzpOrderBody(BaseModel):
+    plan_id: str
+
+
+class RzpVerifyBody(BaseModel):
+    plan_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+def _razorpay_client():
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=503,
+                            detail="Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.")
+    return razorpay.Client(auth=(key_id, key_secret)), key_id, key_secret
+
+
+async def _apply_plan(workspace_id: str, plan: dict, actor: str,
+                      razorpay_order_id: str | None = None,
+                      razorpay_payment_id: str | None = None):
+    """Upsert subscription and usage records after a verified payment.
+
+    Always upserts — works for both new and existing workspaces.
+    Does NOT reset analyses_used so mid-cycle upgrades keep the usage count.
+    """
+    now = datetime.now(timezone.utc)
+    period_end = now + timedelta(days=30)
+
+    sub_fields = {
+        "workspace_id": workspace_id,
+        "plan_id": plan["id"],
+        "plan_name": plan["name"],
+        "plan_price": plan["price"],
+        "status": "active",
+        "billing_cycle": "monthly",
+        "billing_period_start": now.isoformat(),
+        "billing_period_end": period_end.isoformat(),
+        "next_billing_date": period_end.isoformat(),
+        "activated_at": now.isoformat(),
+        "sandbox": False,
+        # Razorpay test mode — no real card info available
+        "payment_method": None,
+    }
+    if razorpay_order_id:
+        sub_fields["razorpay_order_id"] = razorpay_order_id
+    if razorpay_payment_id:
+        sub_fields["razorpay_payment_id"] = razorpay_payment_id
+
+    await db.subscriptions.update_one(
+        {"workspace_id": workspace_id},
+        {"$set": sub_fields},
+        upsert=True,
+    )
+    # Update limits only — preserve existing analyses_used count
+    await db.usage_records.update_one(
+        {"workspace_id": workspace_id},
+        {"$set": {
+            "analyses_limit": plan["analyses"],
+            "storage_limit_gb": plan["storage_gb"],
+            "users_limit": plan["users"],
+        }},
+        upsert=True,
+    )
+    await audit(workspace_id, actor, "subscription_changed",
+                f"Upgraded to {plan['name']} via Razorpay (test)")
+
+
 @router.get("/billing/plans")
 async def billing_plans(user: dict = Depends(get_current_user)):
     return await db.plans.find({}, {"_id": 0}).to_list(20)
@@ -501,9 +615,16 @@ async def billing_plans(user: dict = Depends(get_current_user)):
 async def billing(user: dict = Depends(get_current_user)):
     w = ws(user)
     sub = await db.subscriptions.find_one({"workspace_id": w}, {"_id": 0})
-    usage = await db.usage_records.find_one({"workspace_id": w}, {"_id": 0})
+    usage_doc = await db.usage_records.find_one({"workspace_id": w}, {"_id": 0})
     plans = await db.plans.find({}, {"_id": 0}).to_list(20)
     invoices = await db.invoices.find({"workspace_id": w}, {"_id": 0}).sort("date", -1).to_list(50)
+    # Count actual active workspace members for users_used metric
+    usage = None
+    if usage_doc:
+        active_members = await db.workspace_members.count_documents(
+            {"workspace_id": w, "status": "Active"})
+        usage = dict(usage_doc)
+        usage["users_used"] = active_members
     return {"subscription": sub, "usage": usage, "plans": plans, "invoices": invoices, "sandbox": True}
 
 
@@ -517,50 +638,26 @@ async def billing_invoices(user: dict = Depends(get_current_user)):
     return await db.invoices.find({"workspace_id": ws(user)}, {"_id": 0}).sort("date", -1).to_list(50)
 
 
-class UpgradeBody(BaseModel):
-    plan_id: str
-
-
 @router.post("/billing/upgrade")
 async def billing_upgrade(body: UpgradeBody, user: dict = Depends(get_current_user)):
+    """Sandbox plan switch — no payment required. For testing only."""
     plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found.")
     w = ws(user)
     await db.subscriptions.update_one(
         {"workspace_id": w},
-        {"$set": {"plan_id": plan["id"], "plan_name": plan["name"], "sandbox": True}})
+        {"$set": {"plan_id": plan["id"], "plan_name": plan["name"],
+                  "status": "active", "sandbox": True}},
+        upsert=True)
     await db.usage_records.update_one(
         {"workspace_id": w},
         {"$set": {"analyses_limit": plan["analyses"], "storage_limit_gb": plan["storage_gb"],
-                  "users_limit": plan["users"]}})
+                  "users_limit": plan["users"]}},
+        upsert=True)
     await audit(w, user["name"], "subscription_changed", f"Switched to {plan['name']} (sandbox)")
     return {"ok": True, "sandbox": True,
             "message": f"Plan switched to {plan['name']}. This is a sandbox change — no real charge was made."}
-
-
-def _razorpay_client():
-    key_id = os.environ.get("RAZORPAY_KEY_ID")
-    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
-    if not key_id or not key_secret:
-        raise HTTPException(status_code=503, detail="Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.")
-    return razorpay.Client(auth=(key_id, key_secret)), key_id, key_secret
-
-
-async def _apply_plan(workspace_id, plan, actor, payment=None):
-    updates = {"plan_id": plan["id"], "plan_name": plan["name"], "sandbox": False}
-    if payment:
-        updates["last_payment"] = payment
-    await db.subscriptions.update_one({"workspace_id": workspace_id}, {"$set": updates})
-    await db.usage_records.update_one(
-        {"workspace_id": workspace_id},
-        {"$set": {"analyses_limit": plan["analyses"], "storage_limit_gb": plan["storage_gb"],
-                  "users_limit": plan["users"]}})
-    await audit(workspace_id, actor, "subscription_changed", f"Upgraded to {plan['name']} via Razorpay (test)")
-
-
-class RzpOrderBody(BaseModel):
-    plan_id: str
 
 
 @router.post("/billing/razorpay/order")
@@ -568,46 +665,121 @@ async def razorpay_create_order(body: RzpOrderBody, user: dict = Depends(get_cur
     plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found.")
+    # Free plan has no payment — reject Razorpay order creation
+    if plan.get("is_free") or plan["price"] == 0:
+        raise HTTPException(status_code=400, detail="The Free plan does not require payment.")
     client, key_id, _ = _razorpay_client()
-    amount_paise = int(round(float(plan["price"]) * 100))  # server-side amount, never trust client
+    # Amount determined server-side from plan definition — never trust client-supplied amount.
+    # plan["price"] is in INR (whole rupees); Razorpay expects paise (1 INR = 100 paise).
+    amount_paise = int(round(float(plan["price"]) * 100))
     try:
         order = client.order.create({
-            "amount": amount_paise, "currency": "INR", "receipt": f"bp-{uuid.uuid4().hex[:12]}",
+            "amount": amount_paise, "currency": "INR",
+            "receipt": f"bp-{uuid.uuid4().hex[:12]}",
             "notes": {"workspace_id": ws(user), "plan_id": plan["id"], "plan_name": plan["name"]},
         })
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Could not create payment order: {e}")
-    return {"order_id": order["id"], "amount": amount_paise, "currency": "INR",
-            "key_id": key_id, "plan_id": plan["id"], "plan_name": plan["name"],
-            "customer_name": user.get("name"), "customer_email": user.get("email")}
-
-
-class RzpVerifyBody(BaseModel):
-    plan_id: str
-    razorpay_order_id: str
-    razorpay_payment_id: str
-    razorpay_signature: str
+    return {
+        "order_id": order["id"], "amount": amount_paise, "currency": "INR",
+        "key_id": key_id, "plan_id": plan["id"], "plan_name": plan["name"],
+        "customer_name": user.get("name"), "customer_email": user.get("email"),
+    }
 
 
 @router.post("/billing/razorpay/verify")
 async def razorpay_verify(body: RzpVerifyBody, user: dict = Depends(get_current_user)):
+    # 1. Fetch plan server-side — never trust client-supplied amount or plan name
     plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found.")
+
+    # 2. Verify Razorpay HMAC signature — key_secret never leaves the server
     _, _, key_secret = _razorpay_client()
-    expected = hmac.new(key_secret.encode(),
-                        f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode(),
-                        hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        key_secret.encode(),
+        f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
     if not hmac.compare_digest(expected, body.razorpay_signature):
-        # log diagnostics without secrets
         print(f"[Razorpay] signature verification FAILED for order {body.razorpay_order_id}")
-        raise HTTPException(status_code=400, detail="Payment verification failed. Your plan was not changed.")
-    payment = {"order_id": body.razorpay_order_id, "payment_id": body.razorpay_payment_id,
-               "plan_id": plan["id"], "status": "verified", "mode": "test",
-               "at": now_iso()}
-    await _apply_plan(ws(user), plan, user["name"], payment)
-    return {"ok": True, "verified": True, "plan_name": plan["name"],
-            "message": f"Payment verified. You are now on the {plan['name']} plan."}
+        raise HTTPException(status_code=400,
+                            detail="Payment verification failed. Your plan was not changed.")
+
+    # 3. Idempotency — if this payment_id was already processed, return success without duplicating
+    existing_record = await db.payment_records.find_one(
+        {"razorpay_payment_id": body.razorpay_payment_id}, {"_id": 0})
+    if existing_record:
+        sub = await db.subscriptions.find_one({"workspace_id": ws(user)}, {"_id": 0}) or {}
+        return {
+            "ok": True, "verified": True, "idempotent": True,
+            "plan_name": plan["name"],
+            "plan_features": plan.get("features", []),
+            "billing_period_end": sub.get("billing_period_end"),
+            "message": f"Payment already verified. You are on the {plan['name']} plan.",
+        }
+
+    # 4. Create persistent payment record (unique index on razorpay_payment_id prevents duplicates)
+    now = datetime.now(timezone.utc)
+    period_end = now + timedelta(days=30)
+    period_label = now.strftime("%b %Y")
+    invoice_number = f"BP-{now.year}-{uuid.uuid4().hex[:6].upper()}"
+
+    try:
+        await db.payment_records.insert_one({
+            "id": uuid.uuid4().hex,
+            "workspace_id": ws(user),
+            "user_id": user["id"],
+            "plan_id": plan["id"],
+            "plan_name": plan["name"],
+            "amount_paise": int(round(float(plan["price"]) * 100)),
+            "amount_display": plan["price"],
+            "currency": "INR",
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "status": "paid",
+            "mode": "test",
+            "billing_period_start": now.isoformat(),
+            "billing_period_end": period_end.isoformat(),
+            "created_at": now.isoformat(),
+        })
+    except Exception:
+        # Duplicate key — another concurrent request already recorded this payment
+        pass
+
+    # 5. Upsert invoice record (shown in the Billing History table)
+    await db.invoices.update_one(
+        {"razorpay_payment_id": body.razorpay_payment_id},
+        {"$setOnInsert": {
+            "id": uuid.uuid4().hex,
+            "workspace_id": ws(user),
+            "number": invoice_number,
+            "amount": plan["price"],
+            "currency": "INR",
+            "status": "Paid",
+            "date": now.isoformat(),
+            "period": period_label,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_order_id": body.razorpay_order_id,
+        }},
+        upsert=True,
+    )
+
+    # 6. Activate subscription and update entitlements (upserts both subscription + usage)
+    await _apply_plan(
+        ws(user), plan, user["name"],
+        razorpay_order_id=body.razorpay_order_id,
+        razorpay_payment_id=body.razorpay_payment_id,
+    )
+
+    return {
+        "ok": True,
+        "verified": True,
+        "plan_name": plan["name"],
+        "plan_features": plan.get("features", []),
+        "billing_period_end": period_end.isoformat(),
+        "message": f"Payment verified. You are now on the {plan['name']} plan.",
+    }
 
 
 # ----------------------------- SETTINGS -----------------------------
@@ -647,3 +819,149 @@ async def patch_workspace(body: WorkspacePatch, user: dict = Depends(get_current
 @router.get("/audit")
 async def audit_events(user: dict = Depends(get_current_user)):
     return await db.audit_events.find({"workspace_id": ws(user)}, {"_id": 0}).sort("created_at", -1).to_list(100)
+# ----------------------------- OPPORTUNITIES -----------------------------
+class OpportunityBody(BaseModel):
+    tender_id: str
+    tender_name: str
+    estimated_value: float = 0.0
+    req_capital: float = 0.0
+    req_estimators: int = 0
+    req_specialists: int = 0
+    req_project_managers: int = 0
+    status: str = "Evaluating"  # Evaluating, Bidding, Portfolio
+    risk_score: int = 0
+    qualification_score: int = 0
+
+@router.get("/opportunities")
+async def list_opportunities(user: dict = Depends(get_current_user)):
+    return await db.opportunities.find({"workspace_id": ws(user)}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+@router.post("/opportunities")
+async def create_opportunity(body: OpportunityBody, user: dict = Depends(get_current_user)):
+    w = ws(user)
+    oid = uuid.uuid4().hex
+    doc = {
+        "id": oid,
+        "workspace_id": w,
+        **body.model_dump(),
+        "created_at": now_iso()
+    }
+    await db.opportunities.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@router.patch("/opportunities/{oid}")
+async def update_opportunity(oid: str, body: OpportunityBody, user: dict = Depends(get_current_user)):
+    w = ws(user)
+    op = await db.opportunities.find_one({"id": oid, "workspace_id": w})
+    if not op:
+        raise HTTPException(status_code=404, detail="Opportunity not found.")
+    await db.opportunities.update_one({"id": oid}, {"$set": body.model_dump()})
+    return await db.opportunities.find_one({"id": oid}, {"_id": 0})
+
+@router.delete("/opportunities/{oid}")
+async def delete_opportunity(oid: str, user: dict = Depends(get_current_user)):
+    op = await db.opportunities.find_one({"id": oid, "workspace_id": ws(user)})
+    if not op:
+        raise HTTPException(status_code=404, detail="Opportunity not found.")
+    await db.opportunities.delete_one({"id": oid})
+    return {"ok": True}
+
+# ----------------------------- PORTFOLIO & SCENARIOS -----------------------------
+class OptimizeRequest(BaseModel):
+    opportunity_ids: list[str]
+    overrides: dict = {}
+
+@router.post("/portfolio/optimize")
+async def optimize_portfolio_route(body: OptimizeRequest, user: dict = Depends(get_current_user)):
+    w = ws(user)
+    company = await db.companies.find_one({"workspace_id": w}, {"_id": 0})
+    if not company:
+        raise HTTPException(status_code=400, detail="Company profile not found.")
+    
+    opportunities = await db.opportunities.find({"id": {"$in": body.opportunity_ids}, "workspace_id": w}, {"_id": 0}).to_list(100)
+    
+    result = optimize_portfolio(opportunities, company, overrides=body.overrides)
+    return result
+
+@router.get("/portfolio/conflicts")
+async def get_portfolio_conflicts(user: dict = Depends(get_current_user)):
+    w = ws(user)
+    company = await db.companies.find_one({"workspace_id": w}, {"_id": 0})
+    if not company:
+        return {"conflicts": []}
+    
+    # Get all opportunities currently in 'Portfolio' or 'Bidding' status
+    active_opps = await db.opportunities.find(
+        {"workspace_id": w, "status": {"$in": ["Portfolio", "Bidding"]}},
+        {"_id": 0}
+    ).to_list(100)
+    
+    from ai.portfolio import check_feasibility
+    is_feasible, conflicts = check_feasibility(active_opps, company)
+    return {"conflicts": conflicts}
+
+@router.post("/analyses/{aid}/to-opportunity")
+async def analysis_to_opportunity(aid: str, user: dict = Depends(get_current_user)):
+    w = ws(user)
+    a = await db.analyses.find_one({"id": aid, "workspace_id": w})
+    if not a:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+        
+    existing = await db.opportunities.find_one({"analysis_id": aid, "workspace_id": w})
+    if existing:
+        return {"created": False, "opportunity": existing}
+        
+    d = a.get("decision", {})
+    # AI-inferred values could be derived here, but we'll use defaults and let user edit
+    oid = uuid.uuid4().hex
+    doc = {
+        "id": oid,
+        "workspace_id": w,
+        "analysis_id": aid,
+        "tender_id": a.get("tender_document_id", ""),
+        "tender_name": a.get("tender_name", ""),
+        "estimated_value": 0.0,
+        "req_capital": 0.0,
+        "req_estimators": 1,
+        "req_specialists": 0,
+        "req_project_managers": 1,
+        "status": "Evaluating",
+        "risk_score": d.get("risk", 50),
+        "qualification_score": d.get("readiness_score", 50),
+        "created_at": now_iso()
+    }
+    await db.opportunities.insert_one(doc)
+    doc.pop("_id", None)
+    return {"created": True, "opportunity": doc}
+
+class ScenarioBody(BaseModel):
+    name: str
+    overrides: dict
+
+@router.get("/scenarios")
+async def list_scenarios(user: dict = Depends(get_current_user)):
+    return await db.scenarios.find({"workspace_id": ws(user)}, {"_id": 0}).to_list(100)
+
+@router.post("/scenarios")
+async def create_scenario(body: ScenarioBody, user: dict = Depends(get_current_user)):
+    w = ws(user)
+    sid = uuid.uuid4().hex
+    doc = {
+        "id": sid,
+        "workspace_id": w,
+        **body.model_dump(),
+        "created_at": now_iso()
+    }
+    await db.scenarios.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@router.delete("/scenarios/{sid}")
+async def delete_scenario(sid: str, user: dict = Depends(get_current_user)):
+    s = await db.scenarios.find_one({"id": sid, "workspace_id": ws(user)})
+    if not s:
+        raise HTTPException(status_code=404, detail="Scenario not found.")
+    await db.scenarios.delete_one({"id": sid})
+    return {"ok": True}
+

@@ -20,3 +20,10 @@ async def create_indexes():
     await db.opportunities.create_index("workspace_id")
     await db.capacity.create_index("workspace_id")
     await db.portfolio_scenarios.create_index("workspace_id")
+    # Billing indexes
+    await db.subscriptions.create_index("workspace_id")
+    await db.usage_records.create_index("workspace_id")
+    await db.invoices.create_index("workspace_id")
+    await db.payment_records.create_index("workspace_id")
+    # Unique index on payment_id prevents duplicate payment records (idempotency)
+    await db.payment_records.create_index("razorpay_payment_id", unique=True, sparse=True)

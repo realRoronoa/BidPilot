@@ -60,10 +60,17 @@ async def run_analysis(analysis_id):
         await _set_stage(analysis_id, 0)
         tender_doc = await db.documents.find_one(
             {"id": analysis["tender_document_id"]}, {"_id": 0})
-        if not tender_doc or not tender_doc.get("pages"):
-            raise RuntimeError("Tender document could not be read (no extractable text). "
-                               "The file may be scanned or corrupted.")
-        tender_pages = tender_doc["pages"]
+        if not tender_doc:
+            raise RuntimeError("Tender document could not be found.")
+            
+        tender_chunks = await db.document_chunks.find({"document_id": analysis["tender_document_id"]}, {"_id": 0}).to_list(1000)
+        if not tender_chunks:
+            # Fallback if chunks weren't saved for some reason
+            if not tender_doc.get("pages"):
+                raise RuntimeError("Tender document could not be read (no extractable text). "
+                                   "The file may be scanned or corrupted.")
+            tender_chunks = chunk_pages(tender_doc["pages"], tender_doc["id"], "tender", tender_doc["filename"])
+            attach_embeddings(tender_chunks)
 
         company = await db.companies.find_one({"id": analysis["company_id"]}, {"_id": 0})
         company_summary = ""
@@ -72,7 +79,7 @@ async def run_analysis(analysis_id):
                                f"{company.get('years_experience')} yrs | Turnover {company.get('turnover')}")
 
         await _set_stage(analysis_id, 1)
-        requirements, deadlines = await extract_requirements(tender_pages, company_summary)
+        requirements, deadlines = await extract_requirements(tender_chunks, company_summary)
         if not requirements:
             raise RuntimeError("No requirements could be extracted from the tender.")
 
@@ -93,7 +100,7 @@ async def run_analysis(analysis_id):
 
         await _set_stage(analysis_id, 5)
         await _set_stage(analysis_id, 6)
-        risks = await analyze_risks(tender_pages)
+        risks = await analyze_risks(tender_chunks)
 
         await _set_stage(analysis_id, 7)
         action_items = build_action_items(matched, risks)
