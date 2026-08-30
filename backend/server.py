@@ -25,19 +25,41 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("bidpilot")
 
+import re
+from starlette.types import ASGIApp, Scope, Receive, Send
+
+class NormalizePathMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] in ("http", "websocket") and "path" in scope:
+            scope["path"] = re.sub(r"/{2,}", "/", scope["path"])
+        await self.app(scope, receive, send)
+
 app = FastAPI(title="BidPilot API")
+
+# Middlewares are executed in reverse order of addition (last added runs first).
+# 1. NormalizePathMiddleware runs first to clean double slashes in paths.
+# 2. CORSMiddleware runs next with support for all Vercel preview/production domains.
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=[o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.onrender\.com|http://localhost:\d+",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(NormalizePathMiddleware)
 
 app.include_router(auth_router)
 app.include_router(workspace_router)
 app.include_router(portfolio_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "bidpilot", "message": "BidPilot Backend API is running"}
 
 
 @app.get("/api/health")
