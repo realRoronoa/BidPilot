@@ -440,15 +440,27 @@ async def upload_document(background: BackgroundTasks, file: UploadFile = File(.
     # Do not save full 'pages' in the document dict sent to client
     extracted_pages = doc.pop("pages", [])
     if extracted_pages:
-        chunks = chunk_pages(extracted_pages, did, doc_type, file.filename)
-        # Compute embeddings in background or directly (blocking for now as requested)
-        chunks = attach_embeddings(chunks)
-        # Add chunks to MongoDB
-        if chunks:
-            # We add a UUID to each chunk to identify them
-            for c in chunks:
-                c["id"] = uuid.uuid4().hex
-            await db.document_chunks.insert_many(chunks)
+        def process_embeddings_background(pages_data, doc_id, d_type, fname):
+            from rag.pipeline import chunk_pages
+            from rag.embeddings import attach_embeddings
+            import asyncio
+            from core.db import db
+            try:
+                chunks = chunk_pages(pages_data, doc_id, d_type, fname)
+                chunks = attach_embeddings(chunks)
+                if chunks:
+                    for c in chunks:
+                        c["id"] = uuid.uuid4().hex
+                    # Insert in background event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(db.document_chunks.insert_many(chunks))
+                    loop.close()
+            except Exception as e:
+                print(f"Background embedding failed: {e}")
+
+        # Compute embeddings in background to avoid blocking the upload request and OOM timeouts
+        background.add_task(process_embeddings_background, extracted_pages, did, doc_type, file.filename)
 
     if is_scanned:
         doc["notice"] = ("This PDF appears to be scanned; no text could be reliably extracted. "
