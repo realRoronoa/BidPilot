@@ -68,9 +68,11 @@ class LlmChat:
                     return data.get("response") or data.get("content") or data.get("text") or json.dumps(data)
                 return str(data)
             else:
-                print(f"Emergent Gateway returned {resp.status_code}: {resp.text}")
+                raise RuntimeError(f"Emergent Gateway API Error {resp.status_code}: {resp.text}")
         except Exception as e:
-            print(f"Emergent Gateway failed: {e}")
+            if isinstance(e, RuntimeError):
+                raise e
+            raise RuntimeError(f"Emergent Gateway connection failed: {e}")
 
         # 2. Anthropic Direct fallback
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or (self.api_key if self.api_key.startswith("sk-ant-") else None)
@@ -99,7 +101,7 @@ class LlmChat:
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
 
-        raise RuntimeError("Could not connect to LLM gateway. Please ensure EMERGENT_LLM_KEY is configured.")
+        raise RuntimeError("LLM APIs failed. Check your API keys and the Emergent Proxy status.")
 
 
 def _new_chat(system_message: str) -> LlmChat:
