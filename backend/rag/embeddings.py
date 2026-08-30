@@ -10,7 +10,7 @@ from rag.pipeline import retrieve as keyword_retrieve
 
 logger = logging.getLogger("bidpilot.embeddings")
 
-MODEL_NAME = "BAAI/bge-small-en-v1.5"
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 _model = None
 _load_failed = False
 
