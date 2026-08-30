@@ -21,7 +21,7 @@ def get_model():
         return _model
     try:
         from fastembed import TextEmbedding
-        _model = TextEmbedding(model_name=MODEL_NAME)
+        _model = TextEmbedding(model_name=MODEL_NAME, threads=1)
         logger.info("Embedding model loaded")
     except Exception as e:  # pragma: no cover
         _load_failed = True
