@@ -95,23 +95,31 @@ def _call_openai(system_message: str, user_text: str) -> str:
 
 
 def _call_gemini(system_message: str, user_text: str) -> str:
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        raise RuntimeError("google-genai is not installed")
+
     api_key = _clean_key(os.environ.get("GEMINI_API_KEY"))
-    model = _clean_key(os.environ.get("GEMINI_MODEL")) or "gemini-1.5-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = {
-        "systemInstruction": {"parts": [{"text": system_message}]},
-        "contents": [{"parts": [{"text": user_text}]}],
-        "generationConfig": {"temperature": 0.1},
-    }
-    resp = requests.post(url, json=payload, timeout=90)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Gemini API Error (HTTP {resp.status_code}): {resp.text}")
-    data = resp.json()
-    candidates = data.get("candidates", [])
-    if candidates:
-        parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
-    return ""
+    model = _clean_key(os.environ.get("GEMINI_MODEL")) or "gemini-3.1-pro-preview"
+    
+    if model.startswith("models/"):
+        model = model[7:]
+
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=user_text,
+            config=types.GenerateContentConfig(
+                system_instruction=system_message,
+                temperature=0.1,
+            ),
+        )
+        return response.text or ""
+    except Exception as e:
+        raise RuntimeError(f"Gemini API Error: {str(e)}")
 
 
 async def _ask(system_message: str, user_text: str):
