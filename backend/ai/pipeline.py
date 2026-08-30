@@ -46,9 +46,15 @@ def _extract_json(text: str):
     return json.loads(text)
 
 
+def _clean_key(val: str | None) -> str:
+    if not val:
+        return ""
+    return str(val).strip().strip('"').strip("'").strip()
+
+
 def _call_anthropic(system_message: str, user_text: str) -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022").strip()
+    api_key = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
+    model = _clean_key(os.environ.get("ANTHROPIC_MODEL")) or "claude-3-5-sonnet-20241022"
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -67,8 +73,8 @@ def _call_anthropic(system_message: str, user_text: str) -> str:
 
 
 def _call_openai(system_message: str, user_text: str) -> str:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o").strip()
+    api_key = _clean_key(os.environ.get("OPENAI_API_KEY"))
+    model = _clean_key(os.environ.get("OPENAI_MODEL")) or "gpt-4o"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -88,8 +94,8 @@ def _call_openai(system_message: str, user_text: str) -> str:
 
 
 def _call_gemini(system_message: str, user_text: str) -> str:
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    api_key = _clean_key(os.environ.get("GEMINI_API_KEY"))
+    model = _clean_key(os.environ.get("GEMINI_MODEL")) or "gemini-1.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = {
         "systemInstruction": {"parts": [{"text": system_message}]},
@@ -108,11 +114,15 @@ def _call_gemini(system_message: str, user_text: str) -> str:
 
 async def _ask(system_message: str, user_text: str):
     loop = asyncio.get_event_loop()
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    anthropic_key = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
+    openai_key = _clean_key(os.environ.get("OPENAI_API_KEY"))
+    gemini_key = _clean_key(os.environ.get("GEMINI_API_KEY"))
+
+    if anthropic_key:
         raw_text = await loop.run_in_executor(None, _call_anthropic, system_message, user_text)
-    elif os.environ.get("OPENAI_API_KEY"):
+    elif openai_key:
         raw_text = await loop.run_in_executor(None, _call_openai, system_message, user_text)
-    elif os.environ.get("GEMINI_API_KEY"):
+    elif gemini_key:
         raw_text = await loop.run_in_executor(None, _call_gemini, system_message, user_text)
     else:
         raise ValueError(

@@ -65,7 +65,17 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "bidpilot"}
+    return {
+        "status": "ok",
+        "service": "bidpilot",
+        "providers": {
+            "anthropic_configured": bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip()),
+            "openai_configured": bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
+            "gemini_configured": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
+            "emergent_configured": bool((os.environ.get("EMERGENT_UNIVERSAL_KEY") or os.environ.get("EMERGENT_LLM_KEY") or "").strip()),
+        },
+        "anthropic_model": os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+    }
 
 
 async def seed_admin():
