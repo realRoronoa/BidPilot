@@ -58,6 +58,7 @@ app.include_router(portfolio_router)
 
 
 @app.get("/")
+@app.head("/")
 async def root():
     return {"status": "ok", "service": "bidpilot", "message": "BidPilot Backend API is running"}
 
