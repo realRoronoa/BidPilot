@@ -26,18 +26,60 @@ export default function Billing() {
   if (!data) return <div className="p-8">Failed to load billing.</div>;
   const { subscription: sub, usage, plans, invoices } = data;
 
+  const loadRazorpay = () => new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
+
   const upgrade = async (planId) => {
     setBusy(planId);
-    try { const r = await api.post("/billing/upgrade", { plan_id: planId }); toast.success(r.message); load(); }
-    catch { toast.error("Failed to change plan"); }
-    setBusy(null);
+    try {
+      const order = await api.post("/billing/razorpay/order", { plan_id: planId });
+      const ok = await loadRazorpay();
+      if (!ok) { toast.error("Could not load Razorpay Checkout"); setBusy(null); return; }
+      const rzp = new window.Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: "BidPilot",
+        description: `${order.plan_name} plan (Test Mode)`,
+        order_id: order.order_id,
+        prefill: { name: order.customer_name, email: order.customer_email },
+        theme: { color: "#1A365D" },
+        handler: async (resp) => {
+          try {
+            const v = await api.post("/billing/razorpay/verify", {
+              plan_id: planId,
+              razorpay_order_id: resp.razorpay_order_id,
+              razorpay_payment_id: resp.razorpay_payment_id,
+              razorpay_signature: resp.razorpay_signature,
+            });
+            toast.success(v.message || "Payment verified");
+            load();
+          } catch (e) {
+            toast.error(e.response?.data?.detail || "Payment verification failed. Your plan was not changed.");
+          }
+          setBusy(null);
+        },
+        modal: { ondismiss: () => { toast.info("Payment cancelled — no changes made."); setBusy(null); } },
+      });
+      rzp.on("payment.failed", (r) => { toast.error(r.error?.description || "Payment failed."); setBusy(null); });
+      rzp.open();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not start payment.");
+      setBusy(null);
+    }
   };
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-8">
       <div className="flex items-center justify-between">
         <div><h1 className="font-serif text-2xl font-bold">Billing</h1><p className="mt-1 text-sm text-ink-muted">Manage your subscription, usage and invoices.</p></div>
-        <span className="rounded-sm border border-review-border bg-review-bg px-3 py-1 font-mono text-[11px] font-semibold uppercase text-review-text">Sandbox — no real charges</span>
+        <span className="rounded-sm border border-review-border bg-review-bg px-3 py-1 font-mono text-[11px] font-semibold uppercase text-review-text">Razorpay Test Mode — no real charge</span>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
@@ -70,7 +112,7 @@ export default function Billing() {
               <div className="mt-2"><span className="font-serif text-3xl font-bold">${p.price}</span><span className="text-sm text-ink-muted">/{p.period}</span></div>
               <ul className="mt-4 space-y-1.5 text-sm text-ink-muted">{p.features.map((f) => <li key={f} className="flex items-start gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pass-text" /> {f}</li>)}</ul>
               <button data-testid={`select-plan-${p.id}`} disabled={current || busy} onClick={() => upgrade(p.id)} className={`mt-5 w-full rounded-md px-4 py-2 text-sm font-semibold ${current ? "cursor-default border border-line text-ink-faint" : "bg-navy text-white hover:bg-navy-light"} disabled:opacity-60`}>
-                {busy === p.id ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : current ? "Current plan" : "Switch to this plan"}
+                {busy === p.id ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : current ? "Current plan" : "Upgrade with Razorpay"}
               </button>
             </div>
           );

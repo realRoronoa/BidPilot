@@ -1,6 +1,11 @@
+import os
 import uuid
+import hmac
+import hashlib
 import tempfile
 from datetime import datetime, timezone
+
+import razorpay
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import Response
@@ -532,6 +537,77 @@ async def billing_upgrade(body: UpgradeBody, user: dict = Depends(get_current_us
     await audit(w, user["name"], "subscription_changed", f"Switched to {plan['name']} (sandbox)")
     return {"ok": True, "sandbox": True,
             "message": f"Plan switched to {plan['name']}. This is a sandbox change — no real charge was made."}
+
+
+def _razorpay_client():
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=503, detail="Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.")
+    return razorpay.Client(auth=(key_id, key_secret)), key_id, key_secret
+
+
+async def _apply_plan(workspace_id, plan, actor, payment=None):
+    updates = {"plan_id": plan["id"], "plan_name": plan["name"], "sandbox": False}
+    if payment:
+        updates["last_payment"] = payment
+    await db.subscriptions.update_one({"workspace_id": workspace_id}, {"$set": updates})
+    await db.usage_records.update_one(
+        {"workspace_id": workspace_id},
+        {"$set": {"analyses_limit": plan["analyses"], "storage_limit_gb": plan["storage_gb"],
+                  "users_limit": plan["users"]}})
+    await audit(workspace_id, actor, "subscription_changed", f"Upgraded to {plan['name']} via Razorpay (test)")
+
+
+class RzpOrderBody(BaseModel):
+    plan_id: str
+
+
+@router.post("/billing/razorpay/order")
+async def razorpay_create_order(body: RzpOrderBody, user: dict = Depends(get_current_user)):
+    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found.")
+    client, key_id, _ = _razorpay_client()
+    amount_paise = int(round(float(plan["price"]) * 100))  # server-side amount, never trust client
+    try:
+        order = client.order.create({
+            "amount": amount_paise, "currency": "INR", "receipt": f"bp-{uuid.uuid4().hex[:12]}",
+            "notes": {"workspace_id": ws(user), "plan_id": plan["id"], "plan_name": plan["name"]},
+        })
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not create payment order: {e}")
+    return {"order_id": order["id"], "amount": amount_paise, "currency": "INR",
+            "key_id": key_id, "plan_id": plan["id"], "plan_name": plan["name"],
+            "customer_name": user.get("name"), "customer_email": user.get("email")}
+
+
+class RzpVerifyBody(BaseModel):
+    plan_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@router.post("/billing/razorpay/verify")
+async def razorpay_verify(body: RzpVerifyBody, user: dict = Depends(get_current_user)):
+    plan = await db.plans.find_one({"id": body.plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found.")
+    _, _, key_secret = _razorpay_client()
+    expected = hmac.new(key_secret.encode(),
+                        f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode(),
+                        hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, body.razorpay_signature):
+        # log diagnostics without secrets
+        print(f"[Razorpay] signature verification FAILED for order {body.razorpay_order_id}")
+        raise HTTPException(status_code=400, detail="Payment verification failed. Your plan was not changed.")
+    payment = {"order_id": body.razorpay_order_id, "payment_id": body.razorpay_payment_id,
+               "plan_id": plan["id"], "status": "verified", "mode": "test",
+               "at": now_iso()}
+    await _apply_plan(ws(user), plan, user["name"], payment)
+    return {"ok": True, "verified": True, "plan_name": plan["name"],
+            "message": f"Payment verified. You are now on the {plan['name']} plan."}
 
 
 # ----------------------------- SETTINGS -----------------------------
