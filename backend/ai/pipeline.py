@@ -9,15 +9,10 @@ import os
 import json
 import uuid
 import re
-
 import asyncio
 import requests
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 from rag.embeddings import semantic_retrieve
-
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-6"
 
 ANTI_HALLUCINATION = (
     "STRICT RULES: Never invent tender clauses, company capabilities, certifications, projects, "
@@ -25,14 +20,6 @@ ANTI_HALLUCINATION = (
     "If a value is unclear, mark NEEDS_REVIEW. Always cite the page number from the provided source text. "
     "Return ONLY valid JSON, no markdown fences, no commentary."
 )
-
-
-def _new_chat(system_message: str) -> LlmChat:
-    return LlmChat(
-        api_key=os.environ.get("EMERGENT_LLM_KEY", ""),
-        session_id=f"bidpilot-{uuid.uuid4()}",
-        system_message=system_message,
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
 
 
 def _extract_json(text: str):
@@ -57,10 +44,79 @@ def _extract_json(text: str):
     return json.loads(text)
 
 
+def _call_anthropic(system_message: str, user_text: str) -> str:
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022").strip()
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "max_tokens": 4096,
+        "system": system_message,
+        "messages": [{"role": "user", "content": user_text}],
+    }
+    resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    return "".join(block["text"] for block in data.get("content", []) if block.get("type") == "text")
+
+
+def _call_openai(system_message: str, user_text: str) -> str:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o").strip()
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_text},
+        ],
+        "temperature": 0.1,
+    }
+    resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
+def _call_gemini(system_message: str, user_text: str) -> str:
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_message}]},
+        "contents": [{"parts": [{"text": user_text}]}],
+        "generationConfig": {"temperature": 0.1},
+    }
+    resp = requests.post(url, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    candidates = data.get("candidates", [])
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts)
+    return ""
+
+
 async def _ask(system_message: str, user_text: str):
-    chat = _new_chat(system_message)
-    resp = await chat.send_message(UserMessage(text=user_text))
-    return _extract_json(resp)
+    loop = asyncio.get_event_loop()
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        raw_text = await loop.run_in_executor(None, _call_anthropic, system_message, user_text)
+    elif os.environ.get("OPENAI_API_KEY"):
+        raw_text = await loop.run_in_executor(None, _call_openai, system_message, user_text)
+    elif os.environ.get("GEMINI_API_KEY"):
+        raw_text = await loop.run_in_executor(None, _call_gemini, system_message, user_text)
+    else:
+        raise ValueError(
+            "No direct LLM API key configured for external hosting. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY in your environment variables."
+        )
+    return _extract_json(raw_text)
 
 
 def _tender_context(tender_pages, max_chars=14000):

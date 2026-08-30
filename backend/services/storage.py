@@ -10,37 +10,61 @@ APP_NAME = "bidpilot"
 _storage_key = None
 
 
+LOCAL_STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
+os.makedirs(LOCAL_STORAGE_DIR, exist_ok=True)
+
+
 def init_storage(force: bool = False):
     global _storage_key
+    if not EMERGENT_KEY:
+        return None
     if _storage_key and not force:
         return _storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    _storage_key = resp.json()["storage_key"]
-    return _storage_key
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=10)
+        if resp.status_code == 200:
+            _storage_key = resp.json().get("storage_key")
+            return _storage_key
+    except Exception:
+        pass
+    return None
 
 
 def put_object(path: str, data: bytes, content_type: str = "application/pdf") -> dict:
-    key = init_storage()
-    resp = requests.put(f"{STORAGE_URL}/objects/{path}",
-                        headers={"X-Storage-Key": key, "Content-Type": content_type},
-                        data=data, timeout=120)
-    if resp.status_code == 404:
-        key = init_storage(force=True)
-        resp = requests.put(f"{STORAGE_URL}/objects/{path}",
-                            headers={"X-Storage-Key": key, "Content-Type": content_type},
-                            data=data, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        key = init_storage()
+        if key:
+            resp = requests.put(f"{STORAGE_URL}/objects/{path}",
+                                headers={"X-Storage-Key": key, "Content-Type": content_type},
+                                data=data, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+
+    # Local fallback
+    safe_path = path.replace("/", "_").replace("\\", "_")
+    local_file = os.path.join(LOCAL_STORAGE_DIR, safe_path)
+    with open(local_file, "wb") as f:
+        f.write(data)
+    return {"path": safe_path}
 
 
 def get_object(path: str):
-    key = init_storage()
-    resp = requests.get(f"{STORAGE_URL}/objects/{path}",
-                        headers={"X-Storage-Key": key}, timeout=60)
-    if resp.status_code == 404:
-        key = init_storage(force=True)
-        resp = requests.get(f"{STORAGE_URL}/objects/{path}",
-                            headers={"X-Storage-Key": key}, timeout=60)
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/pdf")
+    try:
+        key = init_storage()
+        if key:
+            resp = requests.get(f"{STORAGE_URL}/objects/{path}",
+                                headers={"X-Storage-Key": key}, timeout=30)
+            if resp.status_code == 200:
+                return resp.content, resp.headers.get("Content-Type", "application/pdf")
+    except Exception:
+        pass
+
+    safe_path = path.replace("/", "_").replace("\\", "_")
+    local_file = os.path.join(LOCAL_STORAGE_DIR, safe_path)
+    if os.path.exists(local_file):
+        with open(local_file, "rb") as f:
+            return f.read(), "application/pdf"
+    raise FileNotFoundError(f"Object {path} not found")
+
