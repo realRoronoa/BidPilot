@@ -10,7 +10,8 @@ import json
 import uuid
 import re
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import asyncio
+import requests
 
 from rag.embeddings import semantic_retrieve
 
@@ -25,9 +26,83 @@ ANTI_HALLUCINATION = (
 )
 
 
+class UserMessage:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class LlmChat:
+    def __init__(self, api_key: str, session_id: str, system_message: str):
+        self.api_key = api_key
+        self.session_id = session_id
+        self.system_message = system_message
+        self.provider = MODEL_PROVIDER
+        self.model = MODEL_NAME
+        self.gateway_url = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip().rstrip("/") or "https://integrations.emergentagent.com"
+
+    def with_model(self, provider: str, model: str):
+        self.provider = provider
+        self.model = model
+        return self
+
+    async def send_message(self, message: UserMessage) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._send_sync, message.text)
+
+    def _send_sync(self, user_text: str) -> str:
+        # 1. Emergent Gateway
+        gateway_endpoint = f"{self.gateway_url}/llm/api/v1/chat"
+        payload = {
+            "emergent_key": self.api_key,
+            "session_id": self.session_id,
+            "system_message": self.system_message,
+            "provider": self.provider,
+            "model": self.model,
+            "messages": [{"role": "user", "content": user_text}],
+        }
+        try:
+            resp = requests.post(gateway_endpoint, json=payload, timeout=90)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict):
+                    return data.get("response") or data.get("content") or data.get("text") or json.dumps(data)
+                return str(data)
+        except Exception:
+            pass
+
+        # 2. Anthropic Direct fallback
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or (self.api_key if self.api_key.startswith("sk-ant-") else None)
+        if anthropic_key:
+            headers = {"x-api-key": anthropic_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+            p = {
+                "model": os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+                "max_tokens": 4096,
+                "system": self.system_message,
+                "messages": [{"role": "user", "content": user_text}],
+            }
+            r = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=p, timeout=90)
+            r.raise_for_status()
+            data = r.json()
+            return "".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+
+        # 3. OpenAI Direct fallback
+        openai_key = os.environ.get("OPENAI_API_KEY") or (self.api_key if self.api_key.startswith("sk-") else None)
+        if openai_key:
+            headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+            p = {
+                "model": os.environ.get("OPENAI_MODEL", "gpt-4o"),
+                "messages": [{"role": "system", "content": self.system_message}, {"role": "user", "content": user_text}],
+            }
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=p, timeout=90)
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+
+        raise RuntimeError("Could not connect to LLM gateway. Please ensure EMERGENT_LLM_KEY is configured.")
+
+
 def _new_chat(system_message: str) -> LlmChat:
     return LlmChat(
-        api_key=os.environ["EMERGENT_LLM_KEY"],
+        api_key=os.environ.get("EMERGENT_LLM_KEY", ""),
         session_id=f"bidpilot-{uuid.uuid4()}",
         system_message=system_message,
     ).with_model(MODEL_PROVIDER, MODEL_NAME)
