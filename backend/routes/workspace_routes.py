@@ -440,22 +440,24 @@ async def upload_document(background: BackgroundTasks, file: UploadFile = File(.
     # Do not save full 'pages' in the document dict sent to client
     extracted_pages = doc.pop("pages", [])
     if extracted_pages:
-        def process_embeddings_background(pages_data, doc_id, d_type, fname):
+        async def process_embeddings_background(pages_data, doc_id, d_type, fname):
             from rag.pipeline import chunk_pages
             from rag.embeddings import attach_embeddings
             import asyncio
             from core.db import db
             try:
+                # Chunking is fast enough for main thread
                 chunks = chunk_pages(pages_data, doc_id, d_type, fname)
-                chunks = attach_embeddings(chunks)
+                
+                # Offload heavy ML model loading and embedding to a thread pool
+                loop = asyncio.get_event_loop()
+                chunks = await loop.run_in_executor(None, attach_embeddings, chunks)
+                
                 if chunks:
                     for c in chunks:
                         c["id"] = uuid.uuid4().hex
-                    # Insert in background event loop
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(db.document_chunks.insert_many(chunks))
-                    loop.close()
+                    # Motor works safely because we are back in the main event loop
+                    await db.document_chunks.insert_many(chunks)
             except Exception as e:
                 print(f"Background embedding failed: {e}")
 

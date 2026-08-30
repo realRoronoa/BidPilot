@@ -70,7 +70,8 @@ async def run_analysis(analysis_id):
                 raise RuntimeError("Tender document could not be read (no extractable text). "
                                    "The file may be scanned or corrupted.")
             tender_chunks = chunk_pages(tender_doc["pages"], tender_doc["id"], "tender", tender_doc["filename"])
-            attach_embeddings(tender_chunks)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, attach_embeddings, tender_chunks)
 
         company = await db.companies.find_one({"id": analysis["company_id"]}, {"_id": 0})
         company_summary = ""
@@ -86,7 +87,8 @@ async def run_analysis(analysis_id):
         await _set_stage(analysis_id, 2)
         company_chunks = await _company_chunks(
             workspace_id, analysis["company_id"], analysis.get("evidence_document_ids"))
-        attach_embeddings(company_chunks)  # embed once, reuse across all requirement matches
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, attach_embeddings, company_chunks)
 
         await _set_stage(analysis_id, 3)
         matched = []
