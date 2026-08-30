@@ -67,7 +67,8 @@ def _call_anthropic(system_message: str, user_text: str) -> str:
         "messages": [{"role": "user", "content": user_text}],
     }
     resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=90)
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        raise RuntimeError(f"Anthropic API Error (HTTP {resp.status_code}): {resp.text}")
     data = resp.json()
     return "".join(block["text"] for block in data.get("content", []) if block.get("type") == "text")
 

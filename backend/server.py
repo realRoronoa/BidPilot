@@ -65,17 +65,60 @@ async def root():
 
 @app.get("/api/health")
 async def health():
+    anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip().strip('"').strip("'").strip()
+    prefix = ""
+    if anthropic_key:
+        prefix = anthropic_key[:7] + "..." if len(anthropic_key) >= 7 else "short"
     return {
         "status": "ok",
         "service": "bidpilot",
         "providers": {
-            "anthropic_configured": bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip()),
+            "anthropic_configured": bool(anthropic_key),
+            "anthropic_key_prefix": prefix,
+            "anthropic_key_length": len(anthropic_key),
             "openai_configured": bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
             "gemini_configured": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
             "emergent_configured": bool((os.environ.get("EMERGENT_UNIVERSAL_KEY") or os.environ.get("EMERGENT_LLM_KEY") or "").strip()),
         },
         "anthropic_model": os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
     }
+
+
+@app.get("/api/health/llm-test")
+async def llm_test():
+    import requests
+    anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip().strip('"').strip("'").strip()
+    model = (os.environ.get("ANTHROPIC_MODEL") or "claude-3-5-sonnet-20241022").strip().strip('"').strip("'").strip()
+    if not anthropic_key:
+        return {"status": "error", "message": "ANTHROPIC_API_KEY is not set"}
+    try:
+        headers = {
+            "x-api-key": anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+        resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=15)
+        if resp.status_code == 200:
+            return {
+                "authentication": "PASS",
+                "status_code": 200,
+                "model": model,
+                "message": "Anthropic Claude API connected successfully!"
+            }
+        else:
+            return {
+                "authentication": "FAIL",
+                "status_code": resp.status_code,
+                "model": model,
+                "anthropic_response": resp.json() if "application/json" in resp.headers.get("Content-Type", "") else resp.text
+            }
+    except Exception as e:
+        return {"authentication": "ERROR", "error": str(e)}
 
 
 async def seed_admin():
