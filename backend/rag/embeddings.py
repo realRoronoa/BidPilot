@@ -33,7 +33,8 @@ def _embed(texts):
     model = get_model()
     if model is None:
         return None
-    vecs = np.array(list(model.embed(texts)), dtype=np.float32)
+    # Limit batch_size to drastically reduce peak memory allocation during inference
+    vecs = np.array(list(model.embed(texts, batch_size=4)), dtype=np.float32)
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return vecs / norms
