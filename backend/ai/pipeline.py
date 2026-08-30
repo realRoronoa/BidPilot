@@ -16,8 +16,10 @@ from rag.embeddings import semantic_retrieve
 
 ANTI_HALLUCINATION = (
     "STRICT RULES: Never invent tender clauses, company capabilities, certifications, projects, "
-    "financial values, or page numbers. Only use the text provided. If evidence is missing, say so. "
-    "If a value is unclear, mark NEEDS_REVIEW. Always cite the page number from the provided source text. "
+    "financial values, or page numbers. Only use the text provided. "
+    "If evidence is missing or insufficient, state 'Insufficient evidence — requires verification.' "
+    "If a requirement or data point is not in the provided tender text, state 'Not found in the provided tender.' "
+    "If a value is unclear, mark NEEDS_REVIEW. Always cite the exact page number from the provided [PAGE n] tags. "
     "Return ONLY valid JSON, no markdown fences, no commentary."
 )
 
