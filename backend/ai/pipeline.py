@@ -104,7 +104,8 @@ def _call_gemini(system_message: str, user_text: str) -> str:
         "generationConfig": {"temperature": 0.1},
     }
     resp = requests.post(url, json=payload, timeout=90)
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        raise RuntimeError(f"Gemini API Error (HTTP {resp.status_code}): {resp.text}")
     data = resp.json()
     candidates = data.get("candidates", [])
     if candidates:
@@ -115,19 +116,19 @@ def _call_gemini(system_message: str, user_text: str) -> str:
 
 async def _ask(system_message: str, user_text: str):
     loop = asyncio.get_event_loop()
-    anthropic_key = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
-    openai_key = _clean_key(os.environ.get("OPENAI_API_KEY"))
     gemini_key = _clean_key(os.environ.get("GEMINI_API_KEY"))
+    openai_key = _clean_key(os.environ.get("OPENAI_API_KEY"))
+    anthropic_key = _clean_key(os.environ.get("ANTHROPIC_API_KEY"))
 
-    if anthropic_key:
-        raw_text = await loop.run_in_executor(None, _call_anthropic, system_message, user_text)
+    if gemini_key:
+        raw_text = await loop.run_in_executor(None, _call_gemini, system_message, user_text)
     elif openai_key:
         raw_text = await loop.run_in_executor(None, _call_openai, system_message, user_text)
-    elif gemini_key:
-        raw_text = await loop.run_in_executor(None, _call_gemini, system_message, user_text)
+    elif anthropic_key:
+        raw_text = await loop.run_in_executor(None, _call_anthropic, system_message, user_text)
     else:
         raise ValueError(
-            "No direct LLM API key configured for external hosting. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY in your environment variables."
+            "No direct LLM API key configured. Please set GEMINI_API_KEY in your Render environment variables."
         )
     return _extract_json(raw_text)
 
