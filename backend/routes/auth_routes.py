@@ -140,14 +140,6 @@ async def login(body: LoginBody, request: Request, response: Response):
     return _public(user)
 
 
-@router.post("/demo-login")
-async def demo_login(response: Response):
-    email = os.environ.get("DEMO_EMAIL", "demo@bidpilot.io")
-    user = await db.users.find_one({"email": email})
-    if not user:
-        raise HTTPException(status_code=500, detail="Demo workspace is not seeded yet. Try again shortly.")
-    set_auth_cookies(response, create_access_token(user["id"], email), create_refresh_token(user["id"]))
-    return _public(user)
 
 
 @router.post("/logout")

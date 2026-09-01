@@ -29,16 +29,6 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const demoLogin = async () => {
-    try {
-      const u = await api.post("/auth/demo-login", {});
-      setUser(u);
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
-    }
-  };
-
   const signup = async (payload) => {
     try {
       const u = await api.post("/auth/signup", payload);
@@ -55,7 +45,7 @@ export function AuthProvider({ children }) {
   };
 
   const value = useMemo(
-    () => ({ user, setUser, login, demoLogin, signup, logout, refresh }),
+    () => ({ user, setUser, login, signup, logout, refresh }),
     [user, refresh]
   );
 

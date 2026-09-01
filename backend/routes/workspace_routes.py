@@ -110,16 +110,13 @@ async def create_analysis(body: CreateAnalysis, background: BackgroundTasks,
 
     # ---- Entitlement enforcement: check analyses_used vs analyses_limit ----
     usage_rec = await db.usage_records.find_one({"workspace_id": w}, {"_id": 0})
-    if usage_rec:
+    if usage_rec and user.get("role", "").lower() != "admin":
         used = usage_rec.get("analyses_used", 0)
-        limit = usage_rec.get("analyses_limit", 5)  # default to Starter limit if missing
+        limit = 2  # Hardcoded limit for everyone (except admins) until real payment integration
         if used >= limit:
-            sub = await db.subscriptions.find_one({"workspace_id": w}, {"_id": 0})
-            plan_name = (sub or {}).get("plan_name", "current plan")
             raise HTTPException(
                 status_code=402,
-                detail=f"Analysis limit reached ({used}/{limit} used on {plan_name}). "
-                       f"Please upgrade your plan to run more analyses."
+                detail="wait for real payment integration"
             )
     # Increment analyses_used counter
     await db.usage_records.update_one(

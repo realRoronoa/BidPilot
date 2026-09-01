@@ -12,7 +12,7 @@ const STEPS = [
 ];
 
 export default function Login() {
-  const { login, demoLogin, signup } = useAuth();
+  const { login, signup } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState("login"); // login | signup | forgot
   const [email, setEmail] = useState("");
@@ -21,7 +21,6 @@ export default function Login() {
   const [company, setCompany] = useState("");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async (e) => {
@@ -32,20 +31,12 @@ export default function Login() {
     else if (mode === "signup") res = await signup({ name, email, password, company_name: company });
     else {
       const { api } = await import("@/lib/api");
-      try { await api.post("/auth/forgot-password", { email }); toast.success("If that email exists, a reset link was sent (check server logs in demo)."); setMode("login"); }
+      try { await api.post("/auth/forgot-password", { email }); toast.success("If that email exists, a reset link was sent."); setMode("login"); }
       catch { toast.error("Could not send reset link."); }
       setLoading(false); return;
     }
     setLoading(false);
     if (res.ok) { toast.success("Welcome to BidPilot"); navigate("/dashboard"); }
-    else setError(res.error);
-  };
-
-  const doDemo = async () => {
-    setError(""); setDemoLoading(true);
-    const res = await demoLogin();
-    setDemoLoading(false);
-    if (res.ok) { toast.success("Demo workspace loaded"); navigate("/dashboard"); }
     else setError(res.error);
   };
 
@@ -137,18 +128,7 @@ export default function Login() {
             </button>
           </form>
 
-          {mode !== "forgot" && (
-            <>
-              <div className="my-5 flex items-center gap-3 text-xs text-ink-faint">
-                <div className="h-px flex-1 bg-line" /> OR <div className="h-px flex-1 bg-line" />
-              </div>
-              <button data-testid="demo-login-btn" onClick={doDemo} disabled={demoLoading}
-                className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-dashed border-stamp/60 bg-stamp/5 px-4 py-2.5 text-sm font-semibold text-stamp transition-colors hover:bg-stamp/10 disabled:opacity-60">
-                {demoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stamp className="h-4 w-4" />}
-                Demo Login — explore a populated workspace
-              </button>
-            </>
-          )}
+
 
           <p className="mt-6 text-center text-sm text-ink-muted">
             {mode === "login" ? (
